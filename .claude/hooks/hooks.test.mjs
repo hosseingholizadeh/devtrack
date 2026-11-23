@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, matchesGlob } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,13 @@ describe("protect-secrets", () => {
     ["Bash redirect source", "Bash", { command: `sort < ${E}.local` }],
     ["Bash after &&", "Bash", { command: `echo hi && cat ${E}` }],
     ["Bash example-prefixed secret", "Bash", { command: `cat ${E}.example.local` }],
+    ["Read npmrc", "Read", { file_path: "C:/Users/me/.npmrc" }],
+    ["Read netrc", "Read", { file_path: "/home/me/.netrc" }],
+    ["Read git-credentials", "Read", { file_path: "/home/me/.git-credentials" }],
+    ["Read aws credentials", "Read", { file_path: "C:\\Users\\me\\.aws\\credentials" }],
+    ["Read ecdsa key", "Read", { file_path: "/home/me/.ssh/id_ecdsa" }],
+    ["Read pfx", "Read", { file_path: "certs/site.pfx" }],
+    ["Read dotenv.staging", "Read", { file_path: `${E}.staging` }],
   ])("blocks: %s", (_n, tool, input) => {
     expect(check(tool, input)).toBe(2);
   });
@@ -101,6 +108,8 @@ describe("readonly-bash", () => {
     "git -C . diff --stat",
     "git -C src log --oneline",
     "git diff -- src/app/page.tsx",
+    "git diff HEAD~1",
+    "git log origin/develop..HEAD --oneline",
   ])("allows: %s", (cmd) => expect(check(cmd)).toBe(0));
 
   test.each([
@@ -115,6 +124,12 @@ describe("readonly-bash", () => {
     ["-C outside project", "git -C .. diff"],
     ["-C absolute elsewhere", "git -C C:/Windows diff"],
     ["-C without path", "git -C"],
+    ["-C home expansion", "git -C ~ log -p"],
+    ["-C wildcard that expands to ..", "git -C [.][.]/other status"],
+    ["-C star", "git -C * status"],
+    ["orderfile reads arbitrary file", "git diff -O/etc/passwd"],
+    ["signature program from config", "git log --show-signature"],
+    ["home expansion in args", "git diff ~/x"],
     ["push", "git push origin main"],
     ["commit", "git commit -m x"],
     ["checkout", "git checkout main"],
@@ -134,16 +149,51 @@ describe("readonly-bash", () => {
     ["empty", ""],
   ])("blocks: %s", (_n, cmd) => expect(check(cmd)).toBe(2));
 
-  test("-C inside the project accepts a Git Bash style absolute path", () => {
+  describe("-C filesystem checks (temporary project)", () => {
+    let proj, outside;
+    beforeAll(() => {
+      proj = mkdtempSync(join(tmpdir(), "devtrack-ro-proj-"));
+      outside = mkdtempSync(join(tmpdir(), "devtrack-ro-out-"));
+      mkdirSync(join(proj, "src"));
+      mkdirSync(join(proj, "vendor", "sub", ".git"), { recursive: true }); // nested repository
+      try {
+        symlinkSync(outside, join(proj, "link"), "junction"); // junction works without admin on Windows
+      } catch {
+        // symlink creation not permitted on this machine; the test below skips itself
+      }
+    });
+    afterAll(() => {
+      rmSync(proj, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    });
+    const inProj = (cmd) =>
+      run("readonly-bash.mjs", { tool_input: { command: cmd }, cwd: proj }, { env: { CLAUDE_PROJECT_DIR: proj }, argv: ["git"] }).status;
+
+    test("allows a plain subdirectory", () => expect(inProj("git -C src status")).toBe(0));
+    test("blocks a nested repository (its .git/config could run programs)", () =>
+      expect(inProj("git -C vendor/sub status")).toBe(2));
+    test("blocks a symlink/junction that leaves the project", () => {
+      if (!existsSync(join(proj, "link"))) return; // symlink creation unavailable on this machine
+      expect(inProj("git -C link status")).toBe(2);
+    });
+  });
+
+  test.skipIf(process.platform !== "win32")("-C inside the project accepts a Git Bash style absolute path", () => {
     const abs = repo.replace(/^([A-Za-z]):/, (_m, d) => `/${d.toLowerCase()}`).replace(/\\/g, "/");
     expect(check(`git -C ${abs}/src diff`)).toBe(0);
   });
 
   describe("git-audit profile", () => {
-    test.each(["npm audit", "npm audit --omit=dev", "npm audit --json", "npm ls", "npm ls next", "git diff"])(
-      "allows: %s",
-      (cmd) => expect(check(cmd, "git-audit")).toBe(0),
-    );
+    test.each([
+      "npm audit",
+      "npm audit --omit=dev",
+      "npm audit --json",
+      "npm audit --audit-level=high",
+      "npm ls",
+      "npm ls next",
+      "npm ls @types/node --depth=0",
+      "git diff",
+    ])("allows: %s", (cmd) => expect(check(cmd, "git-audit")).toBe(0));
     test.each([
       "npm audit fix",
       "npm audit fix --force",
@@ -153,6 +203,13 @@ describe("readonly-bash", () => {
       "npm run build",
       "npm audit --prefix=/x",
       "npm ls --prefix=/x",
+      "npm ls -C /other/project", // -C is npm's short form of --prefix
+      "npm ls --pref=/x", // npm resolves option abbreviations
+      "npm audit --userconfig=/x",
+      "npm audit --globalconfig=/x",
+      "npm audit --registry=https://registry.example.invalid",
+      "npm audit --audit-level=high extra",
+      "npm ls ../other",
     ])("blocks: %s", (cmd) => expect(check(cmd, "git-audit")).toBe(2));
   });
 });
@@ -288,7 +345,7 @@ describe("settings.json permissions and hook wiring", () => {
   const covered = (tool, file) => denyPaths(tool).some((g) => matchesGlob(file, g) || matchesGlob(file, g.replace(/^\*\*\//, "")));
 
   test.each(["Read", "Edit"])("%s deny rules cover dotenv variants at any depth", (tool) => {
-    for (const f of [E, `${E}.local`, `${E}.production`, `${E}.development`, `${E}.test`, `${E}.staging.local`, `app/${E}`, `a/b/${E}.local`]) {
+    for (const f of [E, `${E}.local`, `${E}.production`, `${E}.development`, `${E}.test`, `${E}.staging`, `${E}.staging.local`, `app/${E}`, `a/b/${E}.local`]) {
       expect(covered(tool, f), `${tool} should deny ${f}`).toBe(true);
     }
   });
@@ -305,16 +362,49 @@ describe("settings.json permissions and hook wiring", () => {
     );
   });
 
-  test("destructive Bash commands stay denied", () => {
+  test("more credential files are denied", () => {
+    const deny = settings.permissions.deny;
+    for (const p of ["**/.npmrc", "**/.netrc", "**/.git-credentials", "**/*.key", "**/*.pfx", "**/*.p12", "**/id_ecdsa", "~/.aws/**"]) {
+      expect(deny, `Read(${p})`).toContain(`Read(${p})`);
+    }
+  });
+
+  test("destructive Bash commands stay denied, including reordered and -C forms", () => {
     expect(settings.permissions.deny).toEqual(
-      expect.arrayContaining(["Bash(git push --force *)", "Bash(git push -f *)", "Bash(git reset --hard *)", "Bash(npm publish *)"]),
+      expect.arrayContaining([
+        "Bash(git push --force *)",
+        "Bash(git push -f *)",
+        "Bash(git reset --hard *)",
+        "Bash(npm publish *)",
+        "Bash(npm publish)",
+        "Bash(git push *--force*)",
+        "Bash(git push * -f)",
+        "Bash(git push * -f *)",
+        "Bash(git push *--delete*)",
+        "Bash(git -C * push *)",
+        "Bash(git -C * reset --hard*)",
+        "Bash(git clean *)",
+      ]),
     );
   });
 
-  test("allow list stays narrow (no blanket Bash or write-capable git)", () => {
+  test("file-writing / program-running git and npm options are denied even under allowed commands", () => {
+    expect(settings.permissions.deny).toEqual(
+      expect.arrayContaining(["Bash(git * --output*)", "Bash(git * --ext-diff*)", "Bash(git * --no-index*)", "Bash(npx vitest * --config*)", "Bash(npm * --script-shell*)"]),
+    );
+  });
+
+  test("allow list stays narrow (no blanket Bash, write-capable git or branch deletion)", () => {
     for (const a of settings.permissions.allow) {
       expect(a).not.toMatch(/^Bash(\(\*\))?$/);
-      expect(a).not.toMatch(/git (push|commit|checkout|reset|rebase|clean|add)/);
+      expect(a).not.toMatch(/git (push|commit|checkout|reset|rebase|clean|add|branch \*)/);
+    }
+    expect(settings.permissions.allow).toContain("Bash(git branch --list *)");
+  });
+
+  test("changes to the guardrails themselves require human confirmation", () => {
+    for (const p of [".claude/hooks/**", ".claude/settings.json", ".claude/settings.local.json", ".claude/agents/**"]) {
+      expect(settings.permissions.ask, `Edit(${p})`).toContain(`Edit(${p})`);
     }
   });
 

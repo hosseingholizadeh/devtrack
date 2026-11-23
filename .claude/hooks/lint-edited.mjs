@@ -23,7 +23,7 @@ if (!existsSync(abs) || !existsSync(eslint)) process.exit(0); // deleted file, o
 const r = spawnSync(process.execPath, [eslint, "--no-warn-ignored", abs], {
   cwd: root,
   encoding: "utf8",
-  timeout: Number(process.env.DEVTRACK_HOOK_TIMEOUT_MS) || 60_000,
+  timeout: Number(process.env.DEVTRACK_HOOK_TIMEOUT_MS) || 50_000, // below the 60s hook timeout in settings.json so our message wins
 });
 
 if (r.status === 0) process.exit(0);

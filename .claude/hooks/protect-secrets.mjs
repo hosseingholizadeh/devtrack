@@ -35,7 +35,11 @@ const SAMPLE_NAMES = [E, `${E}.local`, `${E}.production`, `${E}.development.loca
 // 1. Literal mentions. `.env` not preceded by a word char; allowed only when it is exactly an example file.
 const ENV_RE = new RegExp(`(?<![A-Za-z0-9_])\\${E.slice(0, 1)}${E.slice(1)}([^\\s"'/\\\\;&|)<>\`]*)`, "gi");
 const SAFE_SUFFIX = /^\.(example|sample|template)$/i;
-const OTHER_SECRETS = /\.credentials\.json|\.pem(?![\w-])|\.key(?![\w-])|(^|[\\/\s"'=:])id_(rsa|ed25519)(?![\w-])/i;
+// Deliberately conservative (some false positives, e.g. an identifier named `item.key` in a Bash
+// command, `.envrc`): a blocked call just means asking the user. Known limits: computed filenames,
+// 8.3 short names and secrets already committed to git history are not detectable here.
+const OTHER_SECRETS =
+  /\.credentials\.json|\.git-credentials|\.aws[\\/]credentials|(^|[\\/\s"'=:])\.(npmrc|netrc)(?![\w-])|\.(pem|key|pfx|p12)(?![\w-])|(^|[\\/\s"'=:])id_(rsa|ecdsa|ed25519)(?![\w-])/i;
 
 function literalHit(text) {
   for (const m of text.matchAll(ENV_RE)) {

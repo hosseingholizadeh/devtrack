@@ -42,4 +42,6 @@ Next.js 16 (App Router) + React 19 + Tailwind 4 + strict TypeScript. Source live
 ## Claude Code setup
 
 - Project config is in `.claude/` (settings, hooks, skills, agents). Personal overrides go in `.claude/settings.local.json` (gitignored).
+- Secrets are guarded in two layers that must stay in sync: `permissions.deny` in settings.json (enumerated dotenv variants, so example files stay readable) and `.claude/hooks/protect-secrets.mjs` (catch-all for other names, wildcards and Bash). Neither is a sandbox: computed filenames in Bash are not detectable.
+- Edits to `.claude/hooks`, `.claude/agents` and settings files prompt for confirmation (`permissions.ask`).
 - MCP is intentionally disabled. Add a server only for a concrete need.

@@ -23,12 +23,13 @@ const git = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8" }).st
 
 // Changed or untracked source files. -uall lists files inside new directories; -z is path-safe.
 const SRC = /\.([cm]?[jt]sx?|css|json)$/;
-const files = git(["status", "--porcelain", "-uall", "-z"])
-  .split("\0")
-  .filter(Boolean)
-  .map((l) => l.slice(3))
-  .filter((p) => SRC.test(p))
-  .sort();
+const records = git(["status", "--porcelain", "-uall", "-z"]).split("\0").filter(Boolean);
+const paths = [];
+for (let i = 0; i < records.length; i++) {
+  paths.push(records[i].slice(3));
+  if (/^[RC]/.test(records[i])) i++; // rename/copy records are followed by the original path
+}
+const files = paths.filter((p) => SRC.test(p)).sort();
 if (files.length === 0) process.exit(0);
 
 // Fingerprint = path + size + mtime of every changed file (covers untracked files and edits alike).
