@@ -103,6 +103,120 @@ describe("protect-secrets", () => {
   });
 });
 
+describe("block-git-push (permission decision for every push spelling; nothing is executed)", () => {
+  const decide = (command) => run("block-git-push.mjs", { tool_name: "Bash", tool_input: { command } }).status;
+
+  test.each([
+    "git push",
+    "git push origin main",
+    "git push --force origin main",
+    "git push origin main --force",
+    "git push -f",
+    "git push -uf origin HEAD", // combined flags
+    "git push --force-with-lease",
+    "git push origin :old-branch", // refspec deletion
+    "git push origin +HEAD:main", // force refspec
+    "git push --delete origin old-branch",
+    "git push --mirror",
+    "git push --tags",
+    "git -C . push",
+    "git -C src/app push origin main",
+    "git -c core.pager=cat push",
+    "git -c user.name=x -c user.email=y push",
+    "git --no-pager push",
+    "git --git-dir=.git push",
+    "git --git-dir .git push",
+    "git --work-tree . push",
+    "git -C . -c k=v --no-pager push",
+    "GIT push", // case-insensitive on Windows
+    "git.exe push",
+    "C:/Program Files/Git/cmd/git.exe push",
+    '"C:\\Program Files\\Git\\cmd\\git.exe" push',
+    "/usr/bin/git push",
+    "git send-pack origin",
+    "git http-push origin",
+    "git status && git push",
+    "git status; git push",
+    "git status | git push",
+    "echo hi\ngit push",
+    "(git push)",
+    "$(git push)",
+    "env GIT_TRACE=1 git push",
+    "xargs git push",
+    "& git push",
+    'sh -c "git push origin main"',
+    "bash -c 'git -C . push'",
+    'powershell -Command "git push"',
+    'eval "git push"',
+    "git submodule foreach 'git push'",
+    "git -c alias.p=push p", // alias defined on the command line
+  ])("denies: %s", (cmd) => expect(decide(cmd)).toBe(2));
+
+  test.each([
+    "git status",
+    "git status --short",
+    "git log --oneline -5",
+    "git log --grep push --oneline",
+    "git log --grep=push",
+    "git diff",
+    "git diff --stat HEAD~1",
+    "git show HEAD",
+    "git -C src status",
+    "git -c core.pager=cat log -1",
+    "git commit -m 'document how to git push safely'", // message text is not a command
+    'git commit -m "fix push bug"',
+    "git stash push -m wip", // local stash, not a remote push
+    "git stash push",
+    "git branch --list",
+    "git remote -v",
+    "git fetch origin",
+    "git pull",
+    "git checkout -b feature/pushnotes",
+    'echo "git push"', // quoted text outside a shell wrapper is data
+    "npm run lint",
+    "ls src",
+    "pushd src",
+    "git -C src diff -- push.txt",
+  ])("allows: %s", (cmd) => expect(decide(cmd)).toBe(0));
+
+  test("denies a push through a repository alias without running it", () => {
+    // Throwaway repo whose config aliases `p` (and a shell alias `sp`) to a push; nothing is pushed.
+    const dir = mkdtempSync(join(tmpdir(), "devtrack-pushalias-"));
+    try {
+      spawnSync("git", ["init", "-q"], { cwd: dir });
+      spawnSync("git", ["config", "alias.p", "push"], { cwd: dir });
+      spawnSync("git", ["config", "alias.up", "push -u origin HEAD"], { cwd: dir });
+      spawnSync("git", ["config", "alias.sp", "!git push origin"], { cwd: dir });
+      spawnSync("git", ["config", "alias.st", "status -sb"], { cwd: dir });
+      const d = (command) =>
+        run("block-git-push.mjs", { tool_name: "Bash", tool_input: { command }, cwd: dir }).status;
+      expect(d("git p")).toBe(2);
+      expect(d("git up")).toBe(2);
+      expect(d("git sp")).toBe(2);
+      expect(d("git st")).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("PowerShell tool input is evaluated the same way", () => {
+    expect(run("block-git-push.mjs", { tool_name: "PowerShell", tool_input: { command: "git -C . push" } }).status).toBe(2);
+    expect(run("block-git-push.mjs", { tool_name: "PowerShell", tool_input: { command: "git status" } }).status).toBe(0);
+  });
+
+  test("fails closed on unreadable or unexpected input", () => {
+    for (const raw of ["garbage", "", "null"]) {
+      const r = run("block-git-push.mjs", null, { raw });
+      expect([raw, r.status]).toEqual([raw, 2]);
+    }
+    expect(run("block-git-push.mjs", { tool_input: { command: 42 } }).status).toBe(2);
+  });
+
+  test("non-shell tool input without a command is ignored", () => {
+    expect(run("block-git-push.mjs", { tool_name: "Read", tool_input: { file_path: "a.ts" } }).status).toBe(0);
+  });
+});
+
 describe("readonly-bash", () => {
   test.each([["garbage"], [""], ["null"]])("fails closed on unreadable or unexpected input: %j", (raw) => {
     const r = run("readonly-bash.mjs", null, { raw, argv: ["git"] });
@@ -388,28 +502,35 @@ describe("settings.json permissions and hook wiring", () => {
     }
   });
 
-  test("destructive Bash commands stay denied, including reordered and -C forms", () => {
+  test("destructive Bash commands stay denied, including -C forms", () => {
     expect(settings.permissions.deny).toEqual(
       expect.arrayContaining([
-        "Bash(git push --force *)",
-        "Bash(git push -f *)",
         "Bash(git reset --hard *)",
         "Bash(npm publish *)",
         "Bash(npm publish)",
-        "Bash(git push *--force*)",
-        "Bash(git push * -f)",
-        "Bash(git push * -f *)",
-        "Bash(git push *--delete*)",
-        "Bash(git -C * push *)",
         "Bash(git -C * reset --hard*)",
         "Bash(git clean *)",
-        "Bash(git push *+*)",
-        "Bash(git push * :*)",
-        "Bash(git -c * push *)",
         "Bash(git branch -D *)",
         "Bash(git stash clear)",
       ]),
     );
+  });
+
+  test("every git push is denied by plain rules; no piecemeal or legacy-suffix push rules remain", () => {
+    const pushRules = settings.permissions.deny.filter((d) => /\bpush\b/.test(d));
+    expect(pushRules.sort()).toEqual(["Bash(git push *)", "Bash(git push)"]);
+  });
+
+  test("no Bash permission rule uses a trailing `:*` (Claude Code reads it as the legacy prefix syntax)", () => {
+    const all = [...settings.permissions.allow, ...settings.permissions.deny, ...(settings.permissions.ask ?? [])];
+    for (const r of all.filter((x) => x.startsWith("Bash("))) {
+      expect(r, `${r} ends with :*`).not.toMatch(/:\*\)$/);
+    }
+  });
+
+  test("the git push hook is registered for Bash and PowerShell", () => {
+    const entry = settings.hooks.PreToolUse.find((h) => h.hooks.some((x) => x.command.includes("block-git-push.mjs")));
+    expect(entry?.matcher.split("|")).toEqual(expect.arrayContaining(["Bash", "PowerShell"]));
   });
 
   test("abbreviated git/npm/vitest option spellings are denied too", () => {

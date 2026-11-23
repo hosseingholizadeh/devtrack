@@ -59,14 +59,7 @@
       "Edit(~/.claude/.credentials.json)",
       "Edit(~/.ssh/**)",
       "Edit(~/.aws/**)",
-      "Bash(git push --force *)",
-      "Bash(git push -f *)",
       "Bash(git reset --hard *)",
-      "Bash(git push *--force*)",
-      "Bash(git push * -f)",
-      "Bash(git push * -f *)",
-      "Bash(git push *--delete*)",
-      "Bash(git -C * push *)",
       "Bash(git -C * reset --hard*)",
       "Bash(git clean *)",
       "Bash(npm publish *)",
@@ -80,9 +73,6 @@
       "Bash(git * --ext*)",
       "Bash(git * -O*)",
       "Bash(git * --exclude-from*)",
-      "Bash(git push *+*)",
-      "Bash(git push * :*)",
-      "Bash(git -c * push *)",
       "Bash(git -c * reset --hard*)",
       "Bash(git branch -D *)",
       "Bash(git stash clear)",
@@ -94,7 +84,9 @@
       "Bash(npx vitest * -c *)",
       "Bash(npm run lint -- *--config*)",
       "Bash(npm run lint -- *--rulesdir*)",
-      "Bash(npm --script-shell*)"
+      "Bash(npm --script-shell*)",
+      "Bash(git push)",
+      "Bash(git push *)"
     ],
     "ask": [
       "Edit(.claude/hooks/**)",
@@ -117,6 +109,15 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-secrets.mjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-git-push.mjs\""
           }
         ]
       }
