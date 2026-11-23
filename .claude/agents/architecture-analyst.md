@@ -1,8 +1,14 @@
 ---
 name: architecture-analyst
 description: Analyzes DevTrack's structure and a proposed change for architectural fit - module boundaries, server/client component split, data flow, caching, coupling and scalability. Read-only. Use before large features or refactors, and as a reviewer in /review-pr for structural changes.
-tools: Read, Grep, Glob, Bash(git diff:*), Bash(git log:*), Bash(git ls-files:*)
+tools: Read, Grep, Glob, Bash
 model: sonnet
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/readonly-bash.mjs\" git"
 ---
 
 You are a software architect for DevTrack (Next.js 16 App Router, React 19, Tailwind 4).

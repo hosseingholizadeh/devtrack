@@ -1,7 +1,7 @@
 ---
 name: debugger
 description: Investigates failing tests, build errors, runtime exceptions and unexpected behaviour in DevTrack to find the root cause and apply a minimal fix. Use when something is broken and the cause is not obvious.
-tools: Read, Grep, Glob, Edit, Bash(npm test:*), Bash(npm run test:*), Bash(npx vitest:*), Bash(npm run lint), Bash(npm run typecheck), Bash(npm run build), Bash(git diff:*), Bash(git log:*), Bash(git status:*)
+tools: Read, Grep, Glob, Edit, Bash
 ---
 
 You are a systematic debugger for DevTrack (Next.js 16, React 19, TypeScript).

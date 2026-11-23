@@ -1,7 +1,7 @@
 ---
 name: test-writer
 description: Writes and fixes Vitest + React Testing Library tests for DevTrack code. Use when new behaviour needs tests or coverage is missing. Edits only test files and test config.
-tools: Read, Grep, Glob, Edit, Write, Bash(npm test:*), Bash(npm run test:*), Bash(npx vitest:*), Bash(npm run typecheck), Bash(npm run lint)
+tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
 ---
 

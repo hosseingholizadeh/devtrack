@@ -1,8 +1,14 @@
 ---
 name: security-auditor
 description: Audits changes for security issues in DevTrack - secrets exposure, injection, XSS, auth/authorization gaps, unsafe server actions, insecure dependencies. Read-only. Use before merging changes that touch auth, data access, server actions, route handlers or dependencies.
-tools: Read, Grep, Glob, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(npm audit:*), Bash(npm ls:*)
+tools: Read, Grep, Glob, Bash
 model: sonnet
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/readonly-bash.mjs\" git-audit"
 ---
 
 You are an application security reviewer for a Next.js 16 App Router project.
