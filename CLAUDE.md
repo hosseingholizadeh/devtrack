@@ -17,7 +17,7 @@ Next.js 16 (App Router) + React 19 + Tailwind 4 + strict TypeScript. Source live
 
 ## Node version
 
-- Supported: `^22.12.0 || ^24.0.0 || >=26.0.0` (`engines` in package.json). This is Vitest 5's range, and it excludes Node 25. CI and `.nvmrc` use Node 24.
+- Supported: `^24.0.0 || >=26.0.0` (`engines` in package.json): the versions CI/`.nvmrc` (24) and local development actually run, within Vitest 5's own range (which excludes Node 25). Widen it only together with a CI matrix.
 - `@types/node` is pinned to `^24` to match the CI/`.nvmrc` runtime. Vitest 5 and Vite 8 need `@types/node` ≥ 22, so the scaffold's `^20` could not be installed.
 - Claude Code hooks (`.claude/hooks/*.mjs`) are plain Node scripts, so they work on Windows without a POSIX shell. Their tests run with `npm test`.
 

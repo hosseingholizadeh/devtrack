@@ -75,19 +75,44 @@
       "Bash(git * --ext-diff*)",
       "Bash(git * --no-index*)",
       "Bash(npx vitest * --config*)",
-      "Bash(npm * --script-shell*)"
+      "Bash(npm * --script-shell*)",
+      "Bash(git * --ou*)",
+      "Bash(git * --ext*)",
+      "Bash(git * -O*)",
+      "Bash(git * --exclude-from*)",
+      "Bash(git push *+*)",
+      "Bash(git push * :*)",
+      "Bash(git -c * push *)",
+      "Bash(git -c * reset --hard*)",
+      "Bash(git branch -D *)",
+      "Bash(git stash clear)",
+      "Bash(git reflog expire *)",
+      "Bash(git gc --prune*)",
+      "Bash(git update-ref -d *)",
+      "Bash(npx vitest --config*)",
+      "Bash(npx vitest -c *)",
+      "Bash(npx vitest * -c *)",
+      "Bash(npm run lint -- *--config*)",
+      "Bash(npm run lint -- *--rulesdir*)",
+      "Bash(npm --script-shell*)"
     ],
     "ask": [
       "Edit(.claude/hooks/**)",
       "Edit(.claude/settings.json)",
       "Edit(.claude/settings.local.json)",
-      "Edit(.claude/agents/**)"
+      "Edit(.claude/agents/**)",
+      "Edit(.claude/skills/**)",
+      "Edit(package.json)",
+      "Edit(vitest.config.*)",
+      "Edit(eslint.config.*)",
+      "Edit(.git/hooks/**)",
+      "Edit(.git/config)"
     ]
   },
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read|Edit|Write|NotebookEdit|Bash|Grep|Glob",
+        "matcher": "Read|Edit|Write|NotebookEdit|Bash|PowerShell|Grep|Glob",
         "hooks": [
           {
             "type": "command",

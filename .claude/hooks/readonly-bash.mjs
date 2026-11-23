@@ -14,7 +14,7 @@ const PROFILES = { git: { npm: [] }, "git-audit": { npm: ["ls", "audit"] } };
 
 // Long options that write files, run external programs, or read outside the repo. Git accepts any
 // unambiguous abbreviation of a long option (`--out=x` == `--output=x`), so prefixes are blocked too.
-const BLOCKED_LONG = ["--output", "--ext-diff", "--textconv", "--no-index", "--exec-path", "--open-files-in-pager", "--show-signature"];
+const BLOCKED_LONG = ["--output", "--ext-diff", "--textconv", "--no-index", "--exec-path", "--open-files-in-pager", "--show-signature", "--exclude-from"];
 
 // npm: only these flags are accepted (npm resolves abbreviations and `-C` means --prefix, so a deny-list is unsafe).
 const NPM_FLAGS = {

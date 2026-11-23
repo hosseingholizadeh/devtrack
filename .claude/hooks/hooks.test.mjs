@@ -43,6 +43,8 @@ describe("protect-secrets", () => {
     ["Grep glob wildcard", "Grep", { pattern: "KEY", glob: ".e*" }],
     ["Grep glob star (ripgrep reaches dotfiles)", "Grep", { pattern: "KEY", glob: "*" }],
     ["Grep path to dotenv", "Grep", { pattern: "KEY", path: `${E}.local` }],
+    ["PowerShell Get-Content", "PowerShell", { command: `Get-Content ${E}.local` }],
+    ["PowerShell wildcard", "PowerShell", { command: "Get-Content .e*" }],
     ["Bash cat", "Bash", { command: `cat ${E}` }],
     ["Bash cat nested", "Bash", { command: `cat app/${E}.production` }],
     ["Bash cat trailing wildcard", "Bash", { command: `cat ${E}*` }],
@@ -144,6 +146,7 @@ describe("readonly-bash", () => {
     ["orderfile reads arbitrary file", "git diff -O/etc/passwd"],
     ["signature program from config", "git log --show-signature"],
     ["home expansion in args", "git diff ~/x"],
+    ["reads exclude file outside repo", "git ls-files --exclude-from=/etc/hosts"],
     ["push", "git push origin main"],
     ["commit", "git commit -m x"],
     ["checkout", "git checkout main"],
@@ -186,8 +189,8 @@ describe("readonly-bash", () => {
     test("allows a plain subdirectory", () => expect(inProj("git -C src status")).toBe(0));
     test("blocks a nested repository (its .git/config could run programs)", () =>
       expect(inProj("git -C vendor/sub status")).toBe(2));
-    test("blocks a symlink/junction that leaves the project", () => {
-      if (!existsSync(join(proj, "link"))) return; // symlink creation unavailable on this machine
+    test("blocks a symlink/junction that leaves the project", (ctx) => {
+      if (!existsSync(join(proj, "link"))) ctx.skip(); // visible skip: link creation not permitted on this machine
       expect(inProj("git -C link status")).toBe(2);
     });
   });
@@ -333,6 +336,8 @@ describe("verify-on-stop", () => {
   });
 
   test("editing an UNTRACKED file invalidates the stamp", () => {
+    // Guard against passing vacuously: a stamp must exist (from the previous test) before the edit.
+    expect(existsSync(stampFor(dir))).toBe(true);
     writeFileSync(join(dir, "src", "feature", "a.ts"), "export const a = 12345;\n");
     expect(warned(stop({ STUB_TSC_EXIT: "1" }))).toBe(true);
   });
@@ -398,6 +403,25 @@ describe("settings.json permissions and hook wiring", () => {
         "Bash(git -C * push *)",
         "Bash(git -C * reset --hard*)",
         "Bash(git clean *)",
+        "Bash(git push *+*)",
+        "Bash(git push * :*)",
+        "Bash(git -c * push *)",
+        "Bash(git branch -D *)",
+        "Bash(git stash clear)",
+      ]),
+    );
+  });
+
+  test("abbreviated git/npm/vitest option spellings are denied too", () => {
+    expect(settings.permissions.deny).toEqual(
+      expect.arrayContaining([
+        "Bash(git * --ou*)",
+        "Bash(git * --ext*)",
+        "Bash(git * -O*)",
+        "Bash(npx vitest --config*)",
+        "Bash(npx vitest -c *)",
+        "Bash(npm run lint -- *--config*)",
+        "Bash(npm --script-shell*)",
       ]),
     );
   });
@@ -417,20 +441,23 @@ describe("settings.json permissions and hook wiring", () => {
   });
 
   test("changes to the guardrails themselves require human confirmation", () => {
-    for (const p of [".claude/hooks/**", ".claude/settings.json", ".claude/settings.local.json", ".claude/agents/**"]) {
+    // Includes files that auto-allowed commands execute (npm scripts, vitest/eslint configs, git hooks).
+    for (const p of [".claude/hooks/**", ".claude/settings.json", ".claude/settings.local.json", ".claude/agents/**", ".claude/skills/**", "package.json", "vitest.config.*", "eslint.config.*", ".git/hooks/**", ".git/config"]) {
       expect(settings.permissions.ask, `Edit(${p})`).toContain(`Edit(${p})`);
     }
   });
 
   test("secret guard covers every file-reaching tool", () => {
     const matcher = settings.hooks.PreToolUse.find((h) => h.hooks.some((x) => x.command.includes("protect-secrets"))).matcher;
-    for (const t of ["Read", "Edit", "Write", "NotebookEdit", "Bash", "Grep", "Glob"]) expect(matcher.split("|")).toContain(t);
+    for (const t of ["Read", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "Grep", "Glob"]) expect(matcher.split("|")).toContain(t);
   });
 
   test("Stop hook budget fits inside its configured timeout", () => {
     const stopHook = settings.hooks.Stop[0].hooks[0];
     const src = readFileSync(hook("verify-on-stop.mjs"), "utf8");
-    const budget = Number(/\|\| (\d[\d_]*); \/\/ total/.exec(src)[1].replace(/_/g, ""));
+    const m = /\|\| (\d[\d_]*); \/\/ total/.exec(src);
+    expect(m, "BUDGET_MS declaration not found in verify-on-stop.mjs (did its format change?)").not.toBeNull();
+    const budget = Number(m[1].replace(/_/g, ""));
     expect(budget).toBeLessThan(stopHook.timeout * 1000);
   });
 

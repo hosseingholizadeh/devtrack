@@ -5,7 +5,7 @@
 // This is defense in depth next to the `permissions.deny` rules in settings.json. It cannot stop
 // every obfuscated shell trick (e.g. building a filename from variables); use the sandbox for that.
 import { readFileSync } from "node:fs";
-import { matchesGlob } from "node:path";
+import * as path from "node:path";
 
 process.removeAllListeners("warning"); // matchesGlob may print an "experimental" warning on some Node versions
 
@@ -16,6 +16,7 @@ const failClosed = (why) => {
   process.exit(2);
 };
 process.on("uncaughtException", (e) => failClosed(`internal error (${e?.message ?? e})`));
+if (typeof path.matchesGlob !== "function") failClosed("this Node version lacks path.matchesGlob (need Node >= 22.5)");
 
 let input = {};
 try {
@@ -31,6 +32,7 @@ const ti = input.tool_input ?? {};
 // regex (not a path), so it is deliberately not inspected.
 const FIELDS = {
   Bash: ["command"],
+  PowerShell: ["command"],
   Glob: ["pattern", "path"],
   Grep: ["path", "glob"],
 };
@@ -65,7 +67,7 @@ function globHit(token, { dotless }) {
   const names = dotless ? SAMPLE_NAMES.flatMap((n) => [n, n.replace(/^\./, "")]) : SAMPLE_NAMES;
   return names.some((n) => {
     try {
-      return matchesGlob(dir + n, t) || matchesGlob(n, t);
+      return path.matchesGlob(dir + n, t) || path.matchesGlob(n, t);
     } catch {
       return false;
     }
@@ -97,7 +99,7 @@ function blocked() {
     // Also check with quotes/backslashes removed so `.e"nv"` style splitting doesn't hide the name.
     const variants = [raw, raw.replace(/["'\\]/g, "")];
     if (variants.some(literalHit)) return true;
-    const tokens = tool === "Bash" ? unquotedWords(raw) : [raw];
+    const tokens = tool === "Bash" || tool === "PowerShell" ? unquotedWords(raw) : [raw];
     // Grep's `glob` is a ripgrep glob: it can override hidden/ignore rules, so `*` DOES reach dotfiles.
     const dotless = tool === "Grep" && raw === ti.glob;
     if (tokens.some((t) => globHit(t, { dotless }))) return true;
