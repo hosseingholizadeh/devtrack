@@ -1,14 +1,14 @@
 ---
 name: review-pr
 description: Review the current branch (or a given base branch) with independent specialist reviewers running in parallel - code correctness, security and architecture - then merge their findings into one prioritized report. Use before opening or merging a PR.
-argument-hint: "[base-branch, default develop]"
+argument-hint: "[base-ref; default develop, else origin/develop]"
 disable-model-invocation: true
-allowed-tools: Bash(git diff *) Bash(git log *) Bash(git status *) Bash(git merge-base *)
+allowed-tools: Bash(git rev-parse *) Bash(git diff *) Bash(git log *) Bash(git status *) Bash(git merge-base *)
 ---
 
 # Parallel PR review
 
-Base branch: `$ARGUMENTS` (default `develop` if empty).
+Base ref: `$ARGUMENTS`. If empty, use `develop` when `git rev-parse --verify --quiet develop` succeeds, otherwise `origin/develop`. If neither exists, ask which base to use.
 
 ## 1. Scope the change
 Run `git merge-base HEAD <base>`, then `git diff <merge-base>...HEAD --stat` and `git log <merge-base>..HEAD --oneline`. If there is no diff, say so and stop. Note whether the change touches: auth/data access/server actions/route handlers/dependencies (security-relevant) and new modules, routes or structural moves (architecture-relevant).

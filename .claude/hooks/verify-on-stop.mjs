@@ -1,6 +1,7 @@
-// Stop hook (WARN ONLY): when source files changed since the last passing check, run typecheck + lint
-// and surface a warning to the user. Never blocks the turn (always exits 0, no "decision").
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+// Stop hook (WARN ONLY): if source files differ from HEAD, run typegen + tsc + eslint and show a warning.
+// Never blocks the turn (always exits 0, no "decision"). A result stamp skips re-running when
+// nothing changed since the last passing run.
+import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -15,35 +16,61 @@ try {
 if (input.stop_hook_active) process.exit(0);
 
 const root = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
-const run = (args) => spawnSync(process.execPath, args, { cwd: root, encoding: "utf8", timeout: 120_000 });
+const BUDGET_MS = Number(process.env.DEVTRACK_HOOK_TIMEOUT_MS) || 150_000; // total; settings.json hook timeout is 180s
+const deadline = Date.now() + BUDGET_MS;
+
 const git = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8" }).stdout ?? "";
 
-// Fingerprint of the working-tree source changes; skip if unchanged since last passing run.
-const SRC = /\.(m?[jt]sx?|css|json)$/;
-const changed = git(["status", "--porcelain"]).split("\n").filter((l) => SRC.test(l.trim()));
-if (changed.length === 0) process.exit(0);
-const fingerprint = createHash("sha1")
-  .update(git(["diff", "HEAD"]) + changed.join("\n"))
-  .digest("hex");
+// Changed or untracked source files. -uall lists files inside new directories; -z is path-safe.
+const SRC = /\.([cm]?[jt]sx?|css|json)$/;
+const files = git(["status", "--porcelain", "-uall", "-z"])
+  .split("\0")
+  .filter(Boolean)
+  .map((l) => l.slice(3))
+  .filter((p) => SRC.test(p))
+  .sort();
+if (files.length === 0) process.exit(0);
+
+// Fingerprint = path + size + mtime of every changed file (covers untracked files and edits alike).
+const hash = createHash("sha1");
+for (const f of files) {
+  try {
+    const s = statSync(join(root, f));
+    hash.update(`${f}:${s.size}:${s.mtimeMs}\n`);
+  } catch {
+    hash.update(`${f}:deleted\n`);
+  }
+}
+const fingerprint = hash.digest("hex");
 const stamp = join(tmpdir(), `devtrack-verified-${createHash("sha1").update(root).digest("hex").slice(0, 8)}`);
-if (existsSync(stamp) && readFileSync(stamp, "utf8") === fingerprint) process.exit(0);
+try {
+  if (existsSync(stamp) && readFileSync(stamp, "utf8") === fingerprint) process.exit(0);
+} catch {}
 
-const bin = (p) => join(root, "node_modules", ...p);
-if (!existsSync(bin(["typescript", "bin", "tsc"]))) process.exit(0); // deps not installed
+const bin = (...p) => join(root, "node_modules", ...p);
+if (!existsSync(bin("typescript", "bin", "tsc"))) process.exit(0); // deps not installed
 
-const problems = [];
-const typegen = run([bin(["next", "dist", "bin", "next"]), "typegen"]);
-const tsc = run([bin(["typescript", "bin", "tsc"]), "--noEmit"]);
-if (typegen.status !== 0 || tsc.status !== 0) {
-  problems.push("typecheck failed:\n" + (tsc.stdout || tsc.stderr || typegen.stderr).trim().split("\n").slice(0, 8).join("\n"));
+// Each step gets whatever is left of the shared budget, so the hook can never outlive its timeout.
+function step(label, args) {
+  const left = deadline - Date.now();
+  if (left <= 0) return `${label}: skipped (time budget used up)`;
+  const r = spawnSync(process.execPath, args, { cwd: root, encoding: "utf8", timeout: left });
+  if (r.status === 0) return null;
+  if (r.status === null) return `${label}: timed out or could not start (${r.error?.code ?? r.signal ?? "timeout"})`;
+  const out = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim().split("\n").slice(0, 8).join("\n");
+  return `${label} failed:\n${out}`;
 }
-const lint = run([bin(["eslint", "bin", "eslint.js"])]);
-if (lint.status !== 0) {
-  problems.push("lint failed:\n" + (lint.stdout || lint.stderr).trim().split("\n").slice(0, 8).join("\n"));
-}
+
+const problems = [
+  step("typegen", [bin("next", "dist", "bin", "next"), "typegen"]),
+  step("typecheck", [bin("typescript", "bin", "tsc"), "--noEmit"]),
+  step("lint", [bin("eslint", "bin", "eslint.js")]),
+].filter(Boolean);
 
 if (problems.length === 0) {
-  writeFileSync(stamp, fingerprint);
+  try {
+    writeFileSync(stamp, fingerprint);
+  } catch {}
   process.exit(0);
 }
 console.log(
