@@ -1,5 +1,5 @@
 // PreToolUse guardrail: block access to secret files (dotenv files, credentials, keys) via any tool.
-// Exit 2 = block (stderr is shown to Claude). Fails open on malformed input.
+// Exit 2 = block (stderr is shown to Claude). Fails CLOSED on malformed input or internal errors.
 // Example files (.env.example/.sample/.template) stay accessible.
 //
 // This is defense in depth next to the `permissions.deny` rules in settings.json. It cannot stop
@@ -9,11 +9,19 @@ import { matchesGlob } from "node:path";
 
 process.removeAllListeners("warning"); // matchesGlob may print an "experimental" warning on some Node versions
 
+// Fail CLOSED: exit 1 would only be a non-blocking error in Claude Code, so any crash or unreadable
+// input must explicitly exit 2 (block) for this security guard.
+const failClosed = (why) => {
+  console.error(`Blocked by protect-secrets hook: ${why}. The guard could not evaluate this call safely.`);
+  process.exit(2);
+};
+process.on("uncaughtException", (e) => failClosed(`internal error (${e?.message ?? e})`));
+
 let input = {};
 try {
   input = JSON.parse(readFileSync(0, "utf8"));
 } catch {
-  process.exit(0);
+  failClosed("unreadable hook input");
 }
 
 const tool = input.tool_name ?? "";

@@ -1,6 +1,6 @@
 // PreToolUse guard for read-only subagents: allow only a small allowlist of read-only commands.
 // Usage (from agent frontmatter): node readonly-bash.mjs <profile>   where profile = git | git-audit
-// Exit 2 = block (stderr is shown to the agent). Fails open on malformed input (other hooks/permissions still apply).
+// Exit 2 = block (stderr is shown to the agent). Fails CLOSED on malformed input or internal errors.
 //
 // Allowed shapes (single simple command; no shell operators, quoting, expansion or wildcards):
 //   git [-C <dir inside the project>] <diff|log|show|status|ls-files> [args]
@@ -22,11 +22,19 @@ const NPM_FLAGS = {
   ls: [/^--json$/, /^--all$/, /^--long$/, /^--depth=\d+$/, /^--omit=(dev|optional|peer)$/, /^--production$/],
 };
 
+// Fail CLOSED: exit 1 would only be a non-blocking error in Claude Code, so any crash or unreadable
+// input must explicitly exit 2 (block) for this security guard.
+const failClosed = (why) => {
+  console.error(`Blocked: read-only guard could not evaluate this command safely (${why}).`);
+  process.exit(2);
+};
+process.on("uncaughtException", (e) => failClosed(`internal error: ${e?.message ?? e}`));
+
 let input = {};
 try {
   input = JSON.parse(readFileSync(0, "utf8"));
 } catch {
-  process.exit(0);
+  failClosed("unreadable hook input");
 }
 
 const profile = PROFILES[process.argv[2]] ?? PROFILES.git;

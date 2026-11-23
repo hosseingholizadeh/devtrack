@@ -88,12 +88,26 @@ describe("protect-secrets", () => {
     expect(check(tool, input)).toBe(0);
   });
 
-  test("fails open on malformed input", () => {
-    expect(run("protect-secrets.mjs", null, { raw: "garbage" }).status).toBe(0);
+  // Security guards fail CLOSED. A crash would otherwise exit 1, which Claude Code treats as a
+  // non-blocking error (i.e. the tool call would proceed).
+  test.each([
+    ["garbage", "not JSON"],
+    ["", "empty input"],
+    ["null", "JSON null (makes the hook throw internally)"],
+  ])("fails closed on unreadable or unexpected input: %j (%s)", (raw) => {
+    const r = run("protect-secrets.mjs", null, { raw });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/Blocked by protect-secrets/);
   });
 });
 
 describe("readonly-bash", () => {
+  test.each([["garbage"], [""], ["null"]])("fails closed on unreadable or unexpected input: %j", (raw) => {
+    const r = run("readonly-bash.mjs", null, { raw, argv: ["git"] });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/Blocked/);
+  });
+
   const check = (command, profile = "git", extra = {}) =>
     run("readonly-bash.mjs", { tool_name: "Bash", tool_input: { command }, ...extra }, { argv: [profile] }).status;
 
