@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [develop, main]
   push:
-    branches: [develop, main]
+    branches: ['**']
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -14,7 +14,12 @@ permissions:
   contents: read
 
 jobs:
+  # Pull requests and pushes to protected branches: full verification.
   verify:
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.ref == 'refs/heads/develop' ||
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -29,4 +34,23 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm run build
+
+  # Pushes to any other branch: lightweight build check only.
+  build:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref != 'refs/heads/develop' &&
+      github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
       - run: npm run build
