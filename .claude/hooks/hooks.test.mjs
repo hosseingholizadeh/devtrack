@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, matchesGlob } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,13 +12,24 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..");
 const hook = (name) => join(here, name);
+const tmpRoot = mkdtempSync(join(tmpdir(), "devtrack-hooks-")); // removed in afterAll below
+afterAll(() => rmSync(tmpRoot, { recursive: true, force: true }));
+const emptyGitConfig = join(tmpRoot, "gitconfig"); // /dev/null is not usable as a config file on Windows
+writeFileSync(emptyGitConfig, "");
+// Keeps the host's global/system git config (aliases, includes, a broken file) out of every hook run.
+const ISOLATED = { GIT_CONFIG_GLOBAL: emptyGitConfig, GIT_CONFIG_NOSYSTEM: "1" };
+const posix = (p) => p.replaceAll("\\", "/"); // a backslash path inside a POSIX double-quoted string is fragile
+const gitIn = (cwd, args) => {
+  const r = spawnSync("git", args, { cwd, env: { ...process.env, ...ISOLATED }, encoding: "utf8" });
+  expect(r.status, `git ${args.join(" ")}: ${r.stderr}`).toBe(0);
+};
 const E = "." + "env"; // dotenv file name, built so this file is easy to grep without noise
 
 function run(script, payload, { env = {}, argv = [], raw } = {}) {
   const t0 = Date.now();
   const r = spawnSync(process.execPath, [hook(script), ...argv], {
     input: raw ?? JSON.stringify(payload),
-    env: { ...process.env, CLAUDE_PROJECT_DIR: repo, ...env },
+    env: { ...process.env, ...ISOLATED, CLAUDE_PROJECT_DIR: repo, ...env },
     encoding: "utf8",
   });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, ms: Date.now() - t0 };
@@ -152,6 +163,205 @@ describe("block-git-push (permission decision for every push spelling; nothing i
     "git -c alias.p=push p", // alias defined on the command line
   ])("denies: %s", (cmd) => expect(decide(cmd)).toBe(2));
 
+  // The Bash tool uses POSIX quoting; the PowerShell tool uses PowerShell quoting.
+  const decidePs = (command) => run("block-git-push.mjs", { tool_name: "PowerShell", tool_input: { command } }).status;
+
+  // Shell-level escaping: the shell turns each of these into a plain `git push`.
+  test.each([
+    String.raw`git pu\sh`, // POSIX backslash escape
+    String.raw`git \push`,
+    String.raw`g\it push origin main`,
+    "git $'push'", // ANSI-C quoting
+    String.raw`git $'pu\x73h'`, // ANSI-C hex escape
+    String.raw`git $'\160ush'`, // ANSI-C octal escape
+    String.raw`git $'push'`, // ANSI-C unicode escape
+    String.raw`git $'\x70\x75\x73\x68' origin`,
+    'git $"push"', // locale-translated string
+    'git p""ush',
+    "git pu''sh",
+    "git 'pu''sh'", // adjacent single-quoted strings are one word in POSIX
+    "git pu\\\nsh", // line continuation joins the word
+    "env 'git' push", // quoted program name after a prefix word
+    'sudo "git" push',
+  ])("Bash: denies escaped or quoted push spelling: %s", (cmd) => expect(decide(cmd)).toBe(2));
+
+  test.each([
+    "git pu`sh origin main", // backtick escapes the next character in PowerShell
+    "git `push",
+    "git `pu`sh",
+    'git "pu`sh"',
+    "& { git push }",
+    "<# it's a comment #>; git push", // block comment with an apostrophe must not hide the push
+    "$x = @'\nit's\n'@\ngit push", // here-string whose body has an odd number of apostrophes
+    '$x = @"\n$(git push)\n"@', // an expandable here-string runs $() inside it
+    "$a = 'push'; git @a", // splatting builds the subcommand
+  ])("PowerShell: denies %s", (cmd) => expect(decidePs(cmd)).toBe(2));
+
+  test.each([
+    "git 'pu''sh'", // doubled single quote is a literal quote in PowerShell: the word is pu'sh, not a push
+    "git commit -m @'\nmention git push here\n'@", // single-quoted here-string is data
+    "git status # it's fine",
+  ])("PowerShell: allows %s", (cmd) => expect(decidePs(cmd)).toBe(0));
+
+  // Command substitution inside double quotes runs as a command, with its own quoting.
+  test.each([
+    'echo "$(git push)"',
+    'echo "$(git -C . push origin main)"',
+    'echo "`git push`"',
+    'echo "x $(echo a; git push) y"',
+    'echo "$(echo "$(git push)")"', // nested substitution
+    'echo "$(echo "a b"; git push)"', // quoted argument with a space inside the substitution
+    'echo "$(git commit -m "a b"; git push)"',
+    `echo "$(echo 'a ) b'; git push)"`, // a `)` inside quotes does not end the substitution
+    'echo "$(echo "$(echo "x y")"; git push)"',
+    "echo \"`echo 'a b'; git push`\"",
+    String.raw`git commit -m "ok" && echo "$(git pu\sh)"`,
+    "git commit -m \"$(cat <<'EOF'\ndon't push\nEOF\n)\" && git push", // heredoc with an apostrophe, then a real push
+    "git commit -m \"$(cat <<EOF\n$(git push)\nEOF\n)\"", // unquoted heredoc delimiter: body expands substitutions
+    "cat <<EOF\nhello\nEOF\ngit push", // a command after the heredoc
+    ": $((1<<3))\ngit push", // `<<` inside arithmetic is not a heredoc
+    "cat <<EOF\ngit push", // unterminated heredoc is scanned as commands
+  ])("Bash: denies push hidden in a substitution or after a heredoc: %s", (cmd) => expect(decide(cmd)).toBe(2));
+
+  test("PowerShell: $() subexpressions inside double quotes run as commands", () => {
+    expect(decidePs('echo "$(git push)"')).toBe(2);
+    expect(decidePs('echo "$(echo "a b"; git push)"')).toBe(2);
+    expect(decidePs('echo "$(git status)"')).toBe(0);
+  });
+
+  // Comments, redirections, heredocs and subshells must not change how the following lines are read.
+  test.each([
+    "echo hi # <<EOF\ngit push\nEOF", // `# <<EOF` is a comment, not a heredoc: the push runs
+    ": # '\ngit push", // an apostrophe in a comment is not a quote
+    'echo "$(echo a # )\ngit push)"', // a `)` in a comment does not close the substitution
+    "git status # it's\ngit push",
+    "git >/dev/null push",
+    "git 2>&1 push",
+    "git </dev/null push origin",
+    "git > out.txt push",
+    "git -C . >/dev/null push",
+    "bash <<'EOF'\ngit push\nEOF", // a heredoc fed to a shell is a script
+    "sh <<EOF\ngit push\nEOF",
+    "cat <<EOF | sh\ngit push\nEOF",
+    "msg=$(cat <<'EOF'\ndon't\nEOF\n); git push", // heredoc inside an unquoted $( ) with an apostrophe in the body
+    "(cat <<'EOF'\ndon't\nEOF\n); git push", // ... and inside a subshell
+    "echo ${x:-<<E }\ngit push\nE", // `<<` inside ${...} is not a heredoc
+    "echo $[1<<2]\ngit push\n2",
+    'echo "$(case x in x) git push;; esac)"', // a case pattern's ) ends the substitution early: fail closed
+    "echo `echo \\`git push\\``", // escaped, nested backticks
+    "echo `git pu\\\\sh`", // backslash rules inside backticks differ: fail closed
+    "'bash' -c 'git push'", // quoted shell name
+    '"sh" -c "git push"',
+    "env 'sh' -c 'git push'",
+    "sh -c git\\ push", // escaped space: one unquoted word
+    "bash -c 'git${IFS}push'", // no whitespace in the payload
+    "GIT_CONFIG_COUNT+=1 GIT_CONFIG_KEY_0+=alias.p GIT_CONFIG_VALUE_0+=push git p",
+    "git -c $K=push x", // dynamic -c key
+    'git -c "$K=push" x',
+    "git -c help.autocorrect=immediate pusj", // autocorrect can turn a typo into a push
+    "git config help.autocorrect immediate",
+    "git $'push\\0x'", // bash truncates an ANSI-C string at NUL
+  ])("Bash: denies %s", (cmd) => expect(decide(cmd)).toBe(2));
+
+  // The subcommand is built at runtime, so it cannot be checked: fail closed.
+  test.each([
+    "git $SUB",
+    "git ${SUB}",
+    'git "$SUB" origin',
+    'git "${SUB}" origin',
+    'git "$(echo push)" origin',
+    'git "pu$(echo sh)"',
+    "git pus?",
+    "git pu*",
+    "git {push,pull}",
+    "git${IFS}push",
+    "git -C . $SUB origin",
+    'git -C "$D" p', // alias would come from an unknowable repository
+    "git --git-dir=$D p",
+  ])("denies a dynamic subcommand or repository: %s", (cmd) => expect(decide(cmd)).toBe(2));
+
+  // Runtime git config can define a push alias that the hook cannot see.
+  test.each([
+    "git --config-env=alias.p=PUSHVAR p",
+    "git --config-env alias.p=PUSHVAR p",
+    "git --config-env=core.pager=X status",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p",
+    "GIT_CONFIG_PARAMETERS=\"'alias.p=push'\" git p",
+    "GIT_CONFIG_GLOBAL=/tmp/evil git p",
+    "GIT_CONFIG_SYSTEM=/tmp/evil git p",
+    "export GIT_CONFIG_COUNT=1; git status",
+    "env GIT_CONFIG_KEY_0=alias.p git status",
+    'env GIT_CONF"IG"_COUNT=1 GIT_CONF"IG"_KEY_0=alias.p GIT_CONF"IG"_VALUE_0=push git p', // names built by quoting
+    "GIT_DIR=/other/.git git p",
+    "GIT_WORK_TREE=/other git p",
+    "git -c alias.p='-C . push' p",
+    "git -c include.path=/tmp/evil.cfg p",
+    "git -c includeIf.gitdir:/.path=/tmp/evil.cfg p",
+    "git config alias.p push && git p", // defines and uses an alias in one command
+    "git config --global alias.p push",
+    "git config include.path /tmp/evil.cfg",
+  ])("Bash: denies injected or defined git config: %s", (cmd) => expect(decide(cmd)).toBe(2));
+
+  test.each(["$env:GIT_CONFIG_COUNT=1; git p", "$env:GIT_CONFIG_COUNT = 1; git p", "$env:GIT_DIR='x'; git p"])(
+    "PowerShell: denies environment config injection: %s",
+    (cmd) => expect(decidePs(cmd)).toBe(2),
+  );
+
+  // Legitimate commands must keep working, including ones that merely mention the dangerous words.
+  test.each([
+    "git commit -m \"it's fine\"",
+    'git commit -m "fix $(date)"', // harmless substitution inside a message
+    "git commit -m \"$(cat <<'EOF'\nfix: stop git push in the hook\n\nCo-Authored-By: someone\nEOF\n)\"", // routine heredoc commit
+    "git commit -m \"$(cat <<'EOF'\ndon't run `git push`; GIT_CONFIG_COUNT=1 is ignored\nEOF\n)\"",
+    "git commit -m \"$(cat <<-'EOF'\n\tgit push\n\tEOF\n)\"",
+    "cat <<'EOF' > notes.txt\ngit push\nEOF\ngit status",
+    'echo "$(git status)"',
+    'echo "`git log -1`"',
+    'git commit -m "x $HOME"', // a variable in a message is not the subcommand
+    'git commit -m "mention GIT_CONFIG_COUNT docs"',
+    "git log --grep GIT_CONFIG",
+    "grep -rn GIT_CONFIG .claude",
+    "git commit -m 'set GIT_DIR=x for tests'",
+    String.raw`git log --grep "pu\sh"`, // escape text outside the subcommand position
+    String.raw`git commit -m "uses git pu\sh docs"`,
+    "git commit -m $'line one\\nline two'", // ANSI-C in a message
+    String.raw`git sta\tus`,
+    "git log --format=%H -1",
+    "git show HEAD@{1}",
+    "git log -- 'src/*.ts'",
+    "git diff $(git merge-base HEAD origin/develop)",
+    "echo $((1<<3))",
+    "echo $HOME/.gitconfig",
+    "ls gitlab-*.log",
+    "git config --get user.name",
+    "git config --get-regexp '^alias\\.'",
+    "git -c core.pager=cat -c color.ui=never log -1",
+    "git 'status'",
+    "echo 'git' status",
+    'git commit -m "a#b"', // `#` inside a word is not a comment
+    "echo $#",
+    "git status # trailing comment mentioning git push",
+    "git log --grep=#123",
+    "git status >/dev/null",
+    "git status 2>&1",
+    "git diff > out.patch",
+    "git commit -m \"$(cat <<'EOF'\nit's about git push\nEOF\n)\" 2>&1",
+    "msg=$(cat <<'EOF'\ndon't push\nEOF\n); git commit -m \"$msg\"", // heredoc inside an unquoted $( )
+    "(cat <<'EOF'\ndon't push\nEOF\n) > notes.txt; git status",
+    "echo $((1<<3)); git status",
+    "echo ${x:-default}; git status",
+    "bash script.sh",
+    "bash -c 'echo hi'",
+    "cat <<'EOF' | grep push\nhello git push\nEOF", // a heredoc into grep is data
+  ])("still allows: %s", (cmd) => expect(decide(cmd)).toBe(0));
+
+  test("a denial says why, so config-injection is not reported as a push", () => {
+    const why = (command) => run("block-git-push.mjs", { tool_name: "Bash", tool_input: { command } }).stderr;
+    expect(why("git push")).toMatch(/never run by Claude/);
+    expect(why("GIT_CONFIG_COUNT=1 git status")).toMatch(/GIT_CONFIG/);
+    expect(why("git $SUB")).toMatch(/dynamic/);
+  });
+
   test.each([
     "git status",
     "git status --short",
@@ -183,17 +393,59 @@ describe("block-git-push (permission decision for every push spelling; nothing i
     // Throwaway repo whose config aliases `p` (and a shell alias `sp`) to a push; nothing is pushed.
     const dir = mkdtempSync(join(tmpdir(), "devtrack-pushalias-"));
     try {
-      spawnSync("git", ["init", "-q"], { cwd: dir });
-      spawnSync("git", ["config", "alias.p", "push"], { cwd: dir });
-      spawnSync("git", ["config", "alias.up", "push -u origin HEAD"], { cwd: dir });
-      spawnSync("git", ["config", "alias.sp", "!git push origin"], { cwd: dir });
-      spawnSync("git", ["config", "alias.st", "status -sb"], { cwd: dir });
+      gitIn(dir, ["init", "-q"]);
+      gitIn(dir, ["config", "alias.p", "push"]);
+      gitIn(dir, ["config", "alias.up", "push -u origin HEAD"]);
+      gitIn(dir, ["config", "alias.sp", "!git push origin"]);
+      gitIn(dir, ["config", "alias.st", "status -sb"]);
       const d = (command) =>
-        run("block-git-push.mjs", { tool_name: "Bash", tool_input: { command }, cwd: dir }).status;
+        run("block-git-push.mjs", { tool_name: "Bash", tool_input: { command }, cwd: dir }, { env: ISOLATED }).status;
       expect(d("git p")).toBe(2);
       expect(d("git up")).toBe(2);
       expect(d("git sp")).toBe(2);
       expect(d("git st")).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("denies aliases whose value reaches a push through global options, other repos or chains", () => {
+    const mk = (aliases) => {
+      const dir = mkdtempSync(join(tmpdir(), "devtrack-pushalias2-"));
+      gitIn(dir, ["init", "-q"]);
+      for (const [k, v] of Object.entries(aliases)) gitIn(dir, ["config", `alias.${k}`, v]);
+      return dir;
+    };
+    const target = mk({ opt: "-C . push", cfg: "-c core.pager=cat push", chain: "opt", safe: "-C . status", dyn: "$SUB", sh: "!sh -c 'git push'", log: "!git log --oneline", envp: "!GIT_CONFIG_COUNT=1 git status" });
+    const plain = mk({});
+    try {
+      const d = (command, cwd) => run("block-git-push.mjs", { tool_name: "Bash", tool_input: { command }, cwd }, { env: ISOLATED }).status;
+      expect(d("git opt", target)).toBe(2); // alias value starts with a global option
+      expect(d("git cfg", target)).toBe(2);
+      expect(d("git chain", target)).toBe(2); // alias of an alias
+      expect(d("git dyn", target)).toBe(2); // dynamic alias subcommand: fail closed
+      expect(d("git sh", target)).toBe(2); // shell alias that runs a quoted push
+      expect(d("git envp", target)).toBe(2);
+      expect(d("git safe", target)).toBe(0);
+      expect(d("git log", target)).toBe(0); // alias that shadows a builtin and refers to itself: no endless recursion
+      // The alias lives in another repository, selected with -C / --git-dir / --work-tree.
+      expect(d(`git -C "${posix(target)}" opt`, plain)).toBe(2);
+      expect(d(`git --git-dir="${posix(target)}/.git" opt`, plain)).toBe(2);
+      expect(d(`git -C "${posix(target)}" safe`, plain)).toBe(0);
+      expect(d("git opt", plain)).toBe(0); // not an alias here, so just an unknown subcommand
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+      rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  test("fails closed when git's alias config cannot be read", () => {
+    const dir = mkdtempSync(join(tmpdir(), "devtrack-badcfg-"));
+    try {
+      gitIn(dir, ["init", "-q"]);
+      writeFileSync(join(dir, ".git", "config"), "[broken\n");
+      const r = run("block-git-push.mjs", { tool_name: "Bash", tool_input: { command: "git status" }, cwd: dir }, { env: ISOLATED });
+      expect(r.status).toBe(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -559,6 +811,32 @@ describe("settings.json permissions and hook wiring", () => {
       expect(a).not.toMatch(/git (push|commit|checkout|reset|rebase|clean|add|branch \*)/);
     }
     expect(settings.permissions.allow).toContain("Bash(git branch --list *)");
+  });
+
+  test("npm lint/test/typecheck/build are allowed only as exact commands, so no arguments (e.g. --config) pass through", () => {
+    const allow = settings.permissions.allow;
+    expect(allow).toEqual(
+      expect.arrayContaining(["Bash(npm run lint)", "Bash(npm run typecheck)", "Bash(npm test)", "Bash(npm run test)", "Bash(npm run build)"]),
+    );
+    // No wildcard (or `:*`) on any npm allow rule: `npm test -- --config evil.mjs` and `npm run lint -- -c x`
+    // must fall through to a prompt instead of loading attacker-chosen config.
+    for (const rule of allow.filter((r) => /^Bash\(npm\b/.test(r))) expect(rule, rule).not.toContain("*");
+    // The only wildcarded script runner is vitest itself, whose config-loading flags are denied below.
+    expect(allow.filter((r) => /^Bash\(np[mx]\b/.test(r) && r.includes("*"))).toEqual(["Bash(npx vitest *)"]);
+  });
+
+  test("project skills never allow npm/npx commands with free-form arguments (except vitest)", () => {
+    const skills = readdirSync(join(repo, ".claude", "skills"));
+    expect(skills.length).toBeGreaterThan(0);
+    for (const name of skills) {
+      const skill = readFileSync(join(repo, ".claude", "skills", name, "SKILL.md"), "utf8");
+      const tools = /^allowed-tools:[ \t]*(.*)$/m.exec(skill)?.[1];
+      if (tools === undefined) continue; // the skill does not pre-approve any tool
+      expect(tools.trim(), `${name}: allowed-tools must be a non-empty single line`).not.toBe("");
+      for (const rule of tools.match(/Bash\([^)]*\)/g) ?? []) {
+        if (/^Bash\(np[mx]\b/.test(rule) && rule.includes("*")) expect(rule, name).toBe("Bash(npx vitest *)");
+      }
+    }
   });
 
   test("changes to the guardrails themselves require human confirmation", () => {

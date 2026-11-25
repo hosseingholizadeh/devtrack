@@ -2,7 +2,7 @@
 name: debug
 description: Systematically diagnose and fix a failing test, build error or runtime bug in DevTrack by delegating to the debugger subagent, then verify. Use when something is broken and the cause is unclear.
 argument-hint: "[error message, failing test or symptom]"
-allowed-tools: Bash(npm test *) Bash(npm run typecheck) Bash(npm run lint)
+allowed-tools: Bash(npm test) Bash(npm run typecheck) Bash(npm run lint)
 ---
 
 # Debug
