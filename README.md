@@ -3,6 +3,19 @@
 A lightweight project tracker for developers: create projects, set start and due
 dates, and track status (Active, Completed, Archived).
 
+## Database (PostgreSQL + Drizzle)
+
+DevTrack stores data in PostgreSQL via Drizzle ORM and node-postgres. Any PostgreSQL works (local, or [Neon](https://neon.tech) free tier).
+
+1. Get a connection string (create a Neon project, or use a local PostgreSQL; add `sslmode=disable` for local servers without SSL).
+2. `cp .env.example .env.local` and set `DATABASE_URL`.
+3. Apply migrations: `npm run db:migrate`.
+4. After changing `src/features/*/schema.ts`: `npm run db:generate`, review the SQL in `drizzle/`, commit it.
+
+Tests: repository and action tests run on in-memory PGlite with the real migrations. Set `TEST_DATABASE_URL`
+(see `.env.example`) to also run the migration test against a real PostgreSQL; CI does this with a service container.
+
+
 It is also a working example of how I build software with AI coding agents while
 keeping engineering standards: tests, CI, branch-based workflow and human review.
 
