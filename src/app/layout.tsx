@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
+import { Sidebar } from "@/components/app-shell/sidebar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,15 +25,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        <header className="border-b border-zinc-200 dark:border-zinc-800">
-          <nav className="mx-auto flex w-full max-w-3xl items-center gap-6 px-4 py-3 text-sm">
-            <Link href="/projects" className="font-semibold">
-              DevTrack
-            </Link>
-          </nav>
-        </header>
-        <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8">{children}</main>
+      <body className="min-h-full md:flex">
+        {/* The sidebar reads the pathname (a runtime value), so it renders behind Suspense. */}
+        <Suspense fallback={<div className="hidden w-60 shrink-0 border-r border-line bg-surface md:block" />}>
+          <Sidebar />
+        </Suspense>
+        <main className="min-w-0 flex-1">
+          <div className="mx-auto w-full max-w-5xl px-4 py-6 md:px-10 md:py-10">{children}</div>
+        </main>
       </body>
     </html>
   );

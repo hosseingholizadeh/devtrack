@@ -1,15 +1,18 @@
 import { statusLabels } from "../format";
 import type { ProjectStatus } from "../schema";
 
-const styles: Record<ProjectStatus, string> = {
-  active: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
-  completed: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
-  archived: "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+// One source of truth for status colour, used by the list, the detail page and the form.
+const styles: Record<ProjectStatus, { badge: string; dot: string }> = {
+  active: { badge: "bg-success-soft text-success", dot: "bg-success" },
+  completed: { badge: "bg-info-soft text-info", dot: "bg-info" },
+  archived: { badge: "bg-neutral-soft text-neutral", dot: "bg-neutral" },
 };
 
 export function ProjectStatusBadge({ status }: { status: ProjectStatus }) {
+  const { badge, dot } = styles[status];
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[status]}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${badge}`}>
+      <span className={`size-1.5 rounded-full ${dot}`} aria-hidden="true" />
       {statusLabels[status]}
     </span>
   );

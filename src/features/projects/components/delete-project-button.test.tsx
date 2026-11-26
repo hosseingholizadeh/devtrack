@@ -8,7 +8,8 @@ describe("DeleteProjectButton", () => {
     render(<DeleteProjectButton projectName="Website" action={action} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    expect(screen.getByText(/Delete .Website.\? This cannot be undone\./)).toBeTruthy();
+    expect(screen.getByText("Delete project?")).toBeTruthy();
+    expect(screen.getByText(/will be permanently\s+deleted/)).toBeTruthy();
     expect(action).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -20,7 +21,7 @@ describe("DeleteProjectButton", () => {
     const action = vi.fn(async () => ({}));
     render(<DeleteProjectButton projectName="Website" action={action} />);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete project" }));
     await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
   });
 
@@ -28,7 +29,7 @@ describe("DeleteProjectButton", () => {
     const action = vi.fn(async () => ({ message: "Could not delete the project. Please try again." }));
     render(<DeleteProjectButton projectName="Website" action={action} />);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    fireEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete project" }));
     expect((await screen.findByRole("alert")).textContent).toBe("Could not delete the project. Please try again.");
   });
 });

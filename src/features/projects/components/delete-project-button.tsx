@@ -1,6 +1,9 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { AlertIcon, TrashIcon } from "@/components/icons";
+import { buttonClass } from "@/components/ui/button";
+import { Sheet } from "@/components/ui/sheet";
 import { initialDeleteState, type DeleteProjectState } from "../action-state";
 
 type Props = {
@@ -12,43 +15,45 @@ export function DeleteProjectButton({ projectName, action }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [state, formAction, pending] = useActionState(action, initialDeleteState);
 
-  if (!confirming) {
-    return (
-      <button
-        type="button"
-        onClick={() => setConfirming(true)}
-        className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 dark:border-red-800 dark:text-red-400"
-      >
+  return (
+    <>
+      <button type="button" onClick={() => setConfirming(true)} className={buttonClass("dangerOutline")}>
+        <TrashIcon />
         Delete
       </button>
-    );
-  }
-
-  return (
-    <form action={formAction} className="flex flex-col gap-2">
-      <p className="text-sm">Delete &ldquo;{projectName}&rdquo;? This cannot be undone.</p>
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-        >
-          {pending ? "Deleting…" : "Yes, delete"}
-        </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => setConfirming(false)}
-          className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium disabled:opacity-60 dark:border-zinc-700"
-        >
-          Cancel
-        </button>
-      </div>
-      {state.message ? (
-        <p role="alert" className="text-sm text-red-700 dark:text-red-400">
-          {state.message}
-        </p>
+      {confirming ? (
+        <Sheet title="Delete project?" variant="modal" onClose={() => setConfirming(false)}>
+          <form action={formAction}>
+            <div className="flex gap-3 px-6 py-5">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-danger-soft text-danger">
+                <AlertIcon />
+              </div>
+              <p className="text-sm leading-relaxed text-muted">
+                <span className="font-medium text-ink">&ldquo;{projectName}&rdquo;</span> will be permanently
+                deleted. This cannot be undone.
+              </p>
+            </div>
+            {state.message ? (
+              <p role="alert" className="mx-6 mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+                {state.message}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2 border-t border-line px-6 py-4">
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => setConfirming(false)}
+                className={buttonClass("secondary", "lg")}
+              >
+                Cancel
+              </button>
+              <button type="submit" disabled={pending} className={buttonClass("danger", "lg")}>
+                {pending ? "Deleting…" : "Delete project"}
+              </button>
+            </div>
+          </form>
+        </Sheet>
       ) : null}
-    </form>
+    </>
   );
 }

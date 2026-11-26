@@ -1,26 +1,118 @@
 @import "tailwindcss";
 
+/* Design tokens. Light by default, dark via the OS preference. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  --canvas: #f8f8fa;
+  --surface: #ffffff;
+  --subtle: #f2f2f5;
+  --line: #e7e7ec;
+  --line-strong: #d6d6de;
+  --ink: #17171c;
+  --muted: #6c6c78;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --accent: #5b5bd6;
+  --accent-hover: #4b4bc4;
+  --accent-soft: #eeeefc;
+  --accent-fg: #ffffff;
+
+  --danger: #d93b3b;
+  --danger-soft: #fdeded;
+  --success: #17874d;
+  --success-soft: #e4f5ec;
+  --info: #3a6fd8;
+  --info-soft: #e8effc;
+  --neutral: #6c6c78;
+  --neutral-soft: #eeeef2;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --canvas: #0e0e11;
+    --surface: #16161a;
+    --subtle: #1d1d22;
+    --line: #26262d;
+    --line-strong: #34343d;
+    --ink: #ededf0;
+    --muted: #9a9aa6;
+
+    --accent: #7b7bf0;
+    --accent-hover: #9090f5;
+    --accent-soft: #23233d;
+    --accent-fg: #0e0e11;
+
+    --danger: #ef6060;
+    --danger-soft: #3a1c1e;
+    --success: #4cc789;
+    --success-soft: #16301f;
+    --info: #6f9bf0;
+    --info-soft: #1b2740;
+    --neutral: #9a9aa6;
+    --neutral-soft: #26262d;
   }
 }
 
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-subtle: var(--subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-neutral: var(--neutral);
+  --color-neutral-soft: var(--neutral-soft);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Subtle motion. */
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+@keyframes sheet-in {
+  from { transform: translateX(24px); opacity: 0; }
+}
+@keyframes pop-in {
+  from { transform: translateY(8px) scale(0.98); opacity: 0; }
+}
+@keyframes toast-in {
+  from { transform: translateY(-8px); opacity: 0; }
+}
+@keyframes drawer-in {
+  from { transform: translateX(-16px); opacity: 0; }
+}
+
+.animate-sheet { animation: sheet-in 0.2s ease-out; }
+.animate-pop { animation: pop-in 0.18s ease-out; }
+.animate-toast { animation: toast-in 0.2s ease-out; }
+.animate-drawer { animation: drawer-in 0.18s ease-out; }
+dialog::backdrop { animation: fade-in 0.2s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after, ::backdrop {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

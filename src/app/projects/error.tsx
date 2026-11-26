@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { AlertIcon } from "@/components/icons";
+import { buttonClass } from "@/components/ui/button";
 
 export default function ProjectsError({ error, retry }: { error: unknown; retry: () => void }) {
   useEffect(() => {
@@ -8,16 +10,15 @@ export default function ProjectsError({ error, retry }: { error: unknown; retry:
   }, [error]);
 
   return (
-    <div role="alert" className="rounded-lg border border-red-300 p-6 dark:border-red-800">
-      <h2 className="text-lg font-medium">Something went wrong</h2>
-      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+    <div role="alert" className="flex flex-col items-center rounded-2xl border border-line bg-surface px-6 py-16 text-center shadow-sm">
+      <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-danger-soft text-danger">
+        <AlertIcon width={22} height={22} />
+      </div>
+      <h2 className="text-lg font-semibold">Something went wrong</h2>
+      <p className="mt-1 max-w-sm text-sm text-muted">
         We couldn&apos;t load your projects. Check your connection and try again.
       </p>
-      <button
-        type="button"
-        onClick={() => retry()}
-        className="mt-4 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
-      >
+      <button type="button" onClick={() => retry()} className={`${buttonClass("primary", "lg")} mt-6`}>
         Try again
       </button>
     </div>

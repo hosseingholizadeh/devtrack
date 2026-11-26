@@ -5,7 +5,7 @@ import { ProjectNotice } from "./project-notice";
 describe("ProjectNotice", () => {
   test.each([
     ["created", "Project created."],
-    ["updated", "Project updated."],
+    ["updated", "Changes saved."],
     ["deleted", "Project deleted."],
   ])("shows a message for %s", (notice, text) => {
     render(<ProjectNotice notice={notice} />);
